@@ -23,12 +23,11 @@ psql -U target_admin -d target
 # Check for duplicates in the first column of a csv file 
 `tail -n +2 mn_zip_codes.csv | cut -d',' -f1 | sort | uniq -d`
 
-
 # Run target_scrape.py (Phase 1 - stores)
 `python target_scrape.py --max_zip_codes 1 --phase stores`
 
 # Run target_scrape.py (Phase 2 - products)
-`python target_scrape.py --max_zip_codes 1 --phase products`
+`python target_scrape.py --use-selenium --concurrency 4 --phase products --max-per-category 175`
 
 # Run target_cluster.py
 `python target_cluster.py --input data/product.csv --output data/product_enriched.csv --metrics-out cluster_metrics.csv --auto-k 34 34  --batch-kmeans`

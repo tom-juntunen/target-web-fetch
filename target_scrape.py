@@ -126,7 +126,7 @@ RANDOM_COUNT_RANGE = (18, 30)         # avoid a fingerprint of exactly 24 every 
 
 UA_POOL = [
     DEFAULT_USER_AGENT,
-    
+
     # Chromium desktop
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
@@ -996,7 +996,9 @@ async def phase_products(red: RedSkyClient, args: argparse.Namespace) -> None:
         logger.error("No stores found. Run the 'stores' phase first (or provide store_raw.jsonl).")
         sys.exit(2)
 
-    store_ids = store_ids[1:2]  # testing one store
+    store_ids = store_ids[2:3]  # testing one store
+    # store_ids = store_ids[:1]  # testing one store
+    # store_ids = store_ids[1:2]  # testing one store
 
     categories = load_categories(Path(args.category_csv))
     seen_pairs = load_seen_store_tcin_pairs(PRODUCT_RAW_PATH)
@@ -1027,16 +1029,19 @@ async def phase_products(red: RedSkyClient, args: argparse.Namespace) -> None:
 
 async def main_async(args: argparse.Namespace) -> None:
     browser = None
+    
+    # --- fast path: export-only modes (no network, no browser) ---
+    if args.phase == "export-stores":
+        export_store_csv(STORE_RAW_PATH, STORE_CSV_PATH)
+        return
+    if args.phase == "export-products":
+        export_product_csv(PRODUCT_RAW_PATH, PRODUCT_CSV_PATH)
+        return
+
     if args.use_selenium:
         browser = BrowserFetcher(headless=not args.no_headless,
                                  start_url="https://www.target.com/")
         browser.start()
-        # # Optional: preload a category page to seed category-scoped cookies
-        # try:
-        #     browser.driver.get("https://www.target.com/c/arts-crafts-sewing-home/-/N-5xt4g")
-        #     time.sleep(2.0)
-        # except Exception:
-        #     pass
 
     red = RedSkyClient(
         api_key=DEFAULT_API_KEY,
@@ -1066,7 +1071,7 @@ def parse_args() -> argparse.Namespace:
                    help="Path to MN zip codes CSV (with a 'ZIP Code' column).")
     p.add_argument("--category-csv", type=str, default="category.csv",
                    help="Path to category CSV (expects data_id and url_path columns).")
-    p.add_argument("--phase", choices=["stores", "products", "all"], default="all",
+    p.add_argument("--phase", choices=["stores", "products", "all", "export-stores", "export-products"], default="all",
                    help="Which phase(s) to run.")
     p.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY,
                    help="Max concurrent HTTP requests (default: 16).")
@@ -1076,7 +1081,7 @@ def parse_args() -> argparse.Namespace:
                    help="Optional cap on products per (store x category) for testing.")
     p.add_argument("--use-selenium", action="store_true", help="Fetch PLP/PDP via a real browser.")
     p.add_argument("--no-headless", action="store_true", help="Run browser visible (recommended if challenged).")
-
+    
     return p.parse_args()
 
 
