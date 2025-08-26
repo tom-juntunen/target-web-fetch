@@ -9,6 +9,10 @@ End-to-end pipeline to (1) collect Target (RedSky) **stores & product** JSON for
 
 Link to Google Sheet: https://docs.google.com/spreadsheets/d/1exfPUOoLQ1Xw2Q0F0g4vXc4JCiedf2LawkWwcpU6aoI
 
+<img width="1407" height="626" alt="Screenshot 2025-08-26 at 2 44 44 PM" src="https://github.com/user-attachments/assets/970827dd-f9bd-41c3-8bf8-e2626694b8f5" />
+
+<img width="1407" height="628" alt="Screenshot 2025-08-26 at 2 45 58 PM" src="https://github.com/user-attachments/assets/c0d093f6-2053-42f8-8715-88afa9313d46" />
+
 ---
 
 ## Contents
