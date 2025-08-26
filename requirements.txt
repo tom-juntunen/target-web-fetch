@@ -1,0 +1,25 @@
+aiohttp
+alembic
+asyncio
+beautifulsoup4
+python-dateutil
+httpx[http2]
+lxml
+openai
+pandas
+psycopg2-binary
+pydantic
+pydantic-settings
+requests
+# scikit-learn
+selenium
+# sentence-transformers
+sqlalchemy
+tenacity
+webdriver-manager
+
+# fuzzywuzzy
+# python-Levenshtein
+
+# termcolor
+# gensim
