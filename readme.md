@@ -7,6 +7,8 @@ End-to-end pipeline to (1) collect Target (RedSky) **stores & product** JSON for
 * **Phase B — Cluster** (`cluster.py`):
   Cleans & featurizes numeric/categorical/text fields, auto-tunes *K*, fits KMeans, writes enriched CSV with cluster diagnostics, labels, neighbors, 2D embeddings, and a per-cluster summary.
 
+Link to Google Sheet: https://docs.google.com/spreadsheets/d/1exfPUOoLQ1Xw2Q0F0g4vXc4JCiedf2LawkWwcpU6aoI
+
 ---
 
 ## Contents
