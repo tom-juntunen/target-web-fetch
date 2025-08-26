@@ -11,11 +11,12 @@ psycopg2-binary
 pydantic
 pydantic-settings
 requests
-# scikit-learn
+scikit-learn
 selenium
 # sentence-transformers
 sqlalchemy
 tenacity
+umap-learn
 webdriver-manager
 
 # fuzzywuzzy
