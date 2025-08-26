@@ -79,13 +79,13 @@ pip install openai tiktoken python-dotenv
 tail -n +2 mn_zip_codes.csv | cut -d',' -f1 | sort | uniq -d
 
 # 3) Run scraper — discover stores then products
-python scraper.py --mn-zip-csv mn_zip_codes.csv --category-csv category.csv --phase all
+python target_scrape.py --mn-zip-csv mn_zip_codes.csv --category-csv category.csv --phase all
 # Tip: start small while testing:
-# python scraper.py --phase stores --max-zip-codes 50
-# python scraper.py --phase products --max-per-category 200 --concurrency 4 --use-selenium
+# python target_scrape.py --phase stores --max-zip-codes 50
+# python target_scrape.py --phase products --max-per-category 200 --concurrency 4 --use-selenium
 
 # 4) Run clustering on exported products CSV
-python cluster.py \
+python target_cluster.py \
   --input data/product.csv \
   --output data/product_enriched.csv \
   --metrics-out cluster_metrics.csv \
@@ -135,7 +135,7 @@ Supports a local `.env` (loaded via `python-dotenv`).
 ## Scraper Usage
 
 ```bash
-python scraper.py --mn-zip-csv mn_zip_codes.csv --category-csv category.csv --phase all
+python target_scrape.py --mn-zip-csv mn_zip_codes.csv --category-csv category.csv --phase all
 ```
 
 **Phases**
@@ -167,7 +167,7 @@ python scraper.py --mn-zip-csv mn_zip_codes.csv --category-csv category.csv --ph
 ## Clustering Usage
 
 ```bash
-python cluster.py \
+python target_cluster.py \
   --input data/product.csv \
   --output data/product_enriched.csv \
   --metrics-out cluster_metrics.csv \
@@ -266,11 +266,11 @@ This project is for research/analysis. **Respect the Target Terms of Use** and r
 * **Example: products phase with guardrails**
 
   ```bash
-  python scraper.py --category-csv category.csv --phase products --use-selenium --concurrency 4 --max-per-category 175
+  python target_scrape.py --category-csv category.csv --phase products --use-selenium --concurrency 4 --max-per-category 175
   ```
 
 * **Example: clustering with fixed K**
 
   ```bash
-  python cluster.py --input data/product.csv --output data/product_enriched.csv --k 34 --summary-out cluster_summary.csv
+  python target_cluster.py --input data/product.csv --output data/product_enriched.csv --k 34 --summary-out cluster_summary.csv
   ```
