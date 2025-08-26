@@ -116,8 +116,51 @@ DEFAULT_API_KEY = os.environ.get("TARGET_API_KEY", "9f36aeafbe60771e321a7cc95a78
 DEFAULT_VISITOR_ID = os.environ.get("TARGET_VISITOR_ID", "0198DD0F37E0020184A9726303478665")
 DEFAULT_CHANNEL = "WEB"
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:115.0) Gecko/20100101 Firefox/115.0"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15"
 )
+
+# --- Soft-block controls ---
+SOFTBLOCK_MAX_RETRIES = 3
+SOFTBLOCK_COOLDOWN_RANGE = (45, 120)  # seconds
+RANDOM_COUNT_RANGE = (18, 30)         # avoid a fingerprint of exactly 24 every time
+
+UA_POOL = [
+    DEFAULT_USER_AGENT,
+    
+    # Chromium desktop
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+
+    # Edge (Chromium)
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/127.0.0.0 Safari/537.36 Edg/127.0.0.0",
+
+    # Firefox desktop
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:128.0) Gecko/20100101 Firefox/128.0",
+
+    # Safari desktop (non-default)
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    "Version/17.5 Safari/605.1.15",
+
+    # iOS/iPadOS Safari
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+
+    # Android Chrome
+    "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/127.0.0.0 Mobile Safari/537.36",
+]
+
+def _random_count():
+    return random.randint(*RANDOM_COUNT_RANGE)
+
+def _new_visitor_id():
+    # RedSky VIDs are hex-like strings in the wild; keep stable unless soft-blocked.
+    return uuid.uuid4().hex[:32].upper()
 
 
 
@@ -342,30 +385,22 @@ class RedSkyClient:
         await self.client.aclose()
 
     async def _get(self, url: str, params: dict) -> httpx.Response:
-        # Shared GET with concurrency, jitter, and retry
         async with self.semaphore:
-
             @retry(
                 reraise=True,
-                stop=stop_after_attempt(6),
-                wait=wait_exponential_jitter(initial=0.5, max=10.0),
+                stop=stop_after_attempt(3),  # small local retries for transient edges
+                wait=wait_exponential_jitter(initial=0.5, max=4.0),
                 retry=retry_if_exception_type((httpx.HTTPError, RedSkyError)),
             )
             async def _attempt() -> httpx.Response:
-                # Tiny jitter to avoid thundering herd
                 await asyncio.sleep(random.uniform(0.05, 0.25))
-                try:
-                    resp = await self.client.get(url, params=params)
-                except httpx.HTTPError as e:
-                    raise e
-                # RedSky occasionally uses 200 with error payloads; we also handle HTTP errors
-                if resp.status_code == 429:
-                    # Force retry with backoff
-                    raise RedSkyError("HTTP 429 Too Many Requests")
-                if resp.status_code >= 500:
-                    raise RedSkyError(f"HTTP {resp.status_code} server error")
+                resp = await self.client.get(url, params=params)
+                if resp.status_code in (429,) or resp.status_code >= 500:
+                    raise RedSkyError(f"HTTP {resp.status_code} server throttled")
+                # Treat *PLP/PDP* 404 as retryable here; other 404s can pass through.
+                if resp.status_code == 404 and ("plp_search" in url or "pdp_client" in url):
+                    raise RedSkyError("HTTP 404 (likely soft block) on PLP/PDP")
                 return resp
-
             return await _attempt()
 
     async def nearby_stores(self, place_zip: str, within_miles: int = 100, limit: int = 20) -> dict:
@@ -384,6 +419,46 @@ class RedSkyClient:
         resp = await self._get(url, params)
         return resp.json()
 
+
+    async def rotate_session(self, *, rotate_vid: bool = False, user_agent: Optional[str] = None) -> None:
+        """
+        Close the current client and open a new one (new TCP/TLS/HTTP2 connection).
+        Optionally rotate visitor_id and/or user agent.
+        """
+        try:
+            await self.client.aclose()
+        except Exception:
+            pass
+
+        if rotate_vid:
+            self.visitor_id = _new_visitor_id()
+
+        ua = user_agent or random.choice(UA_POOL)
+
+        self.client = httpx.AsyncClient(
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Connection": "keep-alive",
+                "Host": "redsky.target.com",
+                "Origin": "https://www.target.com",
+                "Referer": "https://www.target.com/",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "TE": "trailers",
+                "Upgrade-Insecure-Requests": "1",
+                "User-Agent": ua,
+            },
+            timeout=self.client.timeout if self.client else httpx.Timeout(20.0),
+            http2=True,
+            limits=httpx.Limits(
+                max_keepalive_connections=self.semaphore._value,
+                max_connections=self.semaphore._value
+            ),
+        )
 
     async def plp_search_browser(
         self,
@@ -412,7 +487,7 @@ class RedSkyClient:
             "platform": "desktop",
             "pricing_store_id": store_id,
             "scheduled_delivery_store_id": store_id,
-            "store_ids": store_id,
+            "store_ids": str(store_id),
             "useragent": DEFAULT_USER_AGENT,
             "spellcheck": "true",
         }
@@ -531,7 +606,7 @@ class RedSkyClient:
             "is_bot": "false",
             "store_id": store_id,
             "pricing_store_id": store_id,
-            "has_pricing_store_id": "true",
+            "has_pricing_options": "true",
             "has_financing_options": "true",
             "include_obsolete": "true",
             "visitor_id": self.visitor_id,
@@ -758,40 +833,61 @@ async def enumerate_tcins_for_category(
 
     offset = 0
     page_size = PLP_PAGE_SIZE
+    last_success_at = -1
 
     while True:
-        # stop if we’ve reached the API’s offset cap
-        if offset >= MAX_PLP_OFFSET:
-            logger.info("store=%s cat=%s offset cap reached (%d) — stopping",
-                        store_id, category_id, MAX_PLP_OFFSET)
+        if offset > MAX_PLP_OFFSET:
+            logger.info("store=%s cat=%s offset cap reached (%d) — stopping", store_id, category_id, MAX_PLP_OFFSET)
             break
 
-        # clamp count so offset never exceeds the cap on this request
-        safe_count = min(page_size, MAX_PLP_OFFSET - offset + 1)
+        # Randomize count to avoid a rigid fingerprint
+        count = min(_random_count(), MAX_PLP_OFFSET - offset)
+        soft_retries = 0
 
-        try:
-            payload = await red.plp_search(store_id, category_id, url_path, offset, safe_count)
-        except RedSkyError as e:
-            msg = str(e)
-            # treat the offset 400 as end-of-pagination, not a hard failure
-            if ("status" in msg and "400" in msg) and "offset" in msg:
-                logger.info("store=%s cat=%s hit offset 400 at offset=%d — stopping",
-                            store_id, category_id, offset)
-                break
-            # keep the previous behavior for other errors
-            if "404" in msg:
-                logger.info("store=%s cat=%s reached 404 at offset=%d — stopping",
-                            store_id, category_id, offset)
-                break
-            raise
+        while True:
+            try:
+                payload = await red.plp_search(store_id, category_id, url_path, offset, count)
+                tcins = extract_tcins_from_plp_json(payload)
+                # Heuristic: empty tcins immediately after recent success often means soft-block
+                if not tcins and last_success_at >= 0 and offset <= last_success_at + page_size * 2:
+                    raise RedSkyError("Empty PLP page near last success (suspect soft block)")
+                break  # got a payload (even if empty), exit inner soft-retry loop
+            except RedSkyError as e:
+                soft_retries += 1
+                if soft_retries <= SOFTBLOCK_MAX_RETRIES:
+                    cool = random.randint(*SOFTBLOCK_COOLDOWN_RANGE)
+                    logger.info("PLP 404/soft at offset=%d (store=%s cat=%s). Cooldown %ds, rotating session...",
+                                offset, store_id, category_id, cool)
+                    await asyncio.sleep(cool)
+                    await red.rotate_session(rotate_vid=True)  # new VID + fresh HTTP/2 conn
+                    # If a browser is attached, try switching transport after the first failure
+                    if red.browser and soft_retries == 1:
+                        try:
+                            payload = await red.plp_search_browser(store_id, category_id, url_path, offset, count)
+                            tcins = extract_tcins_from_plp_json(payload)
+                            if tcins:
+                                break
+                        except Exception:
+                            pass
+                    continue
+                else:
+                    logger.info("Giving up PLP page at offset=%d after soft-block retries (store=%s cat=%s).",
+                                offset, store_id, category_id)
+                    tcins = []
+                    break  # exit inner loop, treat as empty page
 
-        tcins = extract_tcins_from_plp_json(payload)
+        if not tcins:
+            # Double-check it's not a hard end: probe offset 0 quickly; if that also fails, stop.
+            if last_success_at < 0:
+                logger.info("store=%s cat=%s no tcins at first page — stopping", store_id, category_id)
+                break
+            logger.info("store=%s cat=%s no new tcins at offset=%d — stopping slice", store_id, category_id, offset)
+            break
+
         new_tcins = [t for t in tcins if t not in seen]
-        if not new_tcins:
-            break
-
         collected.extend(new_tcins)
         seen.update(new_tcins)
+        last_success_at = offset
 
         logger.info("store=%s cat=%s offset=%d → +%d tcins (total %d)",
                     store_id, category_id, offset, len(new_tcins), len(collected))
@@ -800,9 +896,8 @@ async def enumerate_tcins_for_category(
             collected = collected[:max_per_category]
             break
 
-        # advance by the amount we actually requested
-        offset += safe_count
-        await asyncio.sleep(random.uniform(0.05, 0.2))
+        offset += count
+        await asyncio.sleep(random.uniform(0.08, 0.25))
 
     return collected
 
@@ -901,7 +996,7 @@ async def phase_products(red: RedSkyClient, args: argparse.Namespace) -> None:
         logger.error("No stores found. Run the 'stores' phase first (or provide store_raw.jsonl).")
         sys.exit(2)
 
-    store_ids = store_ids[:1]  # testing one store
+    store_ids = store_ids[1:2]  # testing one store
 
     categories = load_categories(Path(args.category_csv))
     seen_pairs = load_seen_store_tcin_pairs(PRODUCT_RAW_PATH)
